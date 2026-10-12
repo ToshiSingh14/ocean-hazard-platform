@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { getIncidents } from '../api/incidentsApi';
 import { getHotspots } from '../api/hotspotsApi';
@@ -60,11 +60,25 @@ const COASTAL_LOCATIONS = [
 // Helper component to programmatically pan/zoom map
 function MapFlyTo({ center, zoom }) {
   const map = useMap();
+  const prevRef = useRef({ lat: null, lng: null, zoom: null });
+
   useEffect(() => {
-    if (center) {
-      map.flyTo(center, zoom, { animate: true, duration: 1.2 });
+    if (!center || !Array.isArray(center) || center.length < 2) return;
+    const [lat, lng] = center;
+    const prev = prevRef.current;
+
+    const hasChanged =
+      prev.lat === null ||
+      Math.abs(prev.lat - lat) > 0.0001 ||
+      Math.abs(prev.lng - lng) > 0.0001 ||
+      prev.zoom !== zoom;
+
+    if (hasChanged) {
+      prevRef.current = { lat, lng, zoom };
+      map.flyTo([lat, lng], zoom, { animate: true, duration: 1.2 });
     }
   }, [center, zoom, map]);
+
   return null;
 }
 
@@ -147,6 +161,7 @@ export const MapPage = () => {
   const [incidents, setIncidents] = useState([]);
   const [hotspots, setHotspots] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
   // Filters
@@ -171,9 +186,13 @@ export const MapPage = () => {
   const [mapCenter, setMapCenter] = useState([19.8135, 85.8312]);
   const [mapZoom, setMapZoom] = useState(7);
 
-  const fetchMapData = async () => {
+  const fetchMapData = async (isPoll = false) => {
     try {
-      setLoading(true);
+      if (!isPoll) {
+        setLoading(true);
+      } else {
+        setIsRefreshing(true);
+      }
       setError(null);
       const [incRes, hotRes] = await Promise.all([getIncidents(), getHotspots()]);
       setIncidents(incRes || []);
@@ -182,12 +201,13 @@ export const MapPage = () => {
       setError(err.message || 'Failed to load geospatial incident layers');
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
   useEffect(() => {
-    fetchMapData();
-    const timer = setInterval(() => fetchMapData(), 10000);
+    fetchMapData(false);
+    const timer = setInterval(() => fetchMapData(true), 8000);
     return () => clearInterval(timer);
   }, []);
 
@@ -198,21 +218,23 @@ export const MapPage = () => {
     );
   };
 
-  // Filtered incidents logic
-  const filteredIncidents = incidents.filter((inc) => {
-    // Hazard filter
-    if (!selectedHazards.includes(inc.hazardType)) return false;
-    // Severity filter
-    if (selectedSeverity !== 'all' && inc.severity !== selectedSeverity) return false;
-    // Time filter
-    if (timeRange !== 'all') {
-      const incTime = new Date(inc.lastReportedAt || inc.firstReportedAt).getTime();
-      const now = new Date().getTime();
-      const hours = timeRange === '24h' ? 24 : 168; // 7d
-      if (now - incTime > hours * 3600 * 1000) return false;
-    }
-    return true;
-  });
+  // Filtered incidents logic (memoized to prevent layer thrashing)
+  const filteredIncidents = useMemo(() => {
+    const now = Date.now();
+    return incidents.filter((inc) => {
+      // Hazard filter
+      if (!selectedHazards.includes(inc.hazardType)) return false;
+      // Severity filter
+      if (selectedSeverity !== 'all' && inc.severity !== selectedSeverity) return false;
+      // Time filter
+      if (timeRange !== 'all') {
+        const incTime = new Date(inc.lastReportedAt || inc.firstReportedAt).getTime();
+        const hours = timeRange === '24h' ? 24 : 168; // 7d
+        if (now - incTime > hours * 3600 * 1000) return false;
+      }
+      return true;
+    });
+  }, [incidents, selectedHazards, selectedSeverity, timeRange]);
 
   // Search Location selection handler
   const handleSelectLocation = (loc) => {
@@ -229,12 +251,16 @@ export const MapPage = () => {
     setMapZoom(7);
   };
 
-  // Prepare heatmap point dataset: converts GeoJSON [lng, lat] to Leaflet [lat, lng]
-  const heatPoints = filteredIncidents.map((inc) => ({
-    lat: inc.location.centroid[1],
-    lng: inc.location.centroid[0],
-    severity: inc.severity
-  }));
+  // Prepare heatmap point dataset: converts GeoJSON [lng, lat] to Leaflet [lat, lng] (memoized)
+  const heatPoints = useMemo(() => {
+    return filteredIncidents
+      .filter((inc) => inc.location && Array.isArray(inc.location.centroid) && inc.location.centroid.length >= 2)
+      .map((inc) => ({
+        lat: inc.location.centroid[1],
+        lng: inc.location.centroid[0],
+        severity: inc.severity
+      }));
+  }, [filteredIncidents]);
 
   return (
     <div className="space-y-4">
@@ -252,44 +278,67 @@ export const MapPage = () => {
           </div>
         </div>
 
-        {/* Location Search Input */}
-        <div className="relative w-full md:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search 35+ coastal locations..."
-            className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 text-xs focus:outline-none focus:border-cyan-500"
-          />
-          {searchQuery && (
-            <button
-              onClick={clearSearch}
-              className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-200"
-            >
-              ✕
-            </button>
-          )}
+        {/* Header Right Actions: Live Sync Button & Location Search Input */}
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <button
+            onClick={() => fetchMapData(true)}
+            disabled={isRefreshing}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors shrink-0"
+            title="Sync live layers (8s interval)"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">{isRefreshing ? 'Syncing...' : 'Sync (8s)'}</span>
+          </button>
 
-          {/* Autocomplete Suggestions */}
-          {searchQuery && !selectedLocation && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto divide-y divide-slate-800/60">
-              {COASTAL_LOCATIONS.filter((l) => l.name.toLowerCase().includes(searchQuery.toLowerCase())).map((loc) => (
-                <div
-                  key={loc.name}
-                  onClick={() => handleSelectLocation(loc)}
-                  className="px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 cursor-pointer flex items-center justify-between"
-                >
-                  <span>{loc.name}</span>
-                  <span className="text-[10px] text-slate-500">
-                    {loc.lat.toFixed(2)}, {loc.lng.toFixed(2)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Location Search Input */}
+          <div className="relative w-full md:w-80">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search 35+ coastal locations..."
+              className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 text-xs focus:outline-none focus:border-cyan-500"
+            />
+            {searchQuery && (
+              <button
+                onClick={clearSearch}
+                className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-200"
+              >
+                ✕
+              </button>
+            )}
+
+            {/* Autocomplete Suggestions */}
+            {searchQuery && !selectedLocation && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 max-h-48 overflow-y-auto divide-y divide-slate-800/60">
+                {COASTAL_LOCATIONS.filter((l) => l.name.toLowerCase().includes(searchQuery.toLowerCase())).map((loc) => (
+                  <div
+                    key={loc.name}
+                    onClick={() => handleSelectLocation(loc)}
+                    className="px-3 py-2 text-xs text-slate-200 hover:bg-slate-800 cursor-pointer flex items-center justify-between"
+                  >
+                    <span>{loc.name}</span>
+                    <span className="text-[10px] text-slate-500">
+                      {loc.lat.toFixed(2)}, {loc.lng.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Error Notice */}
+      {error && (
+        <div className="p-3 rounded-xl bg-red-950/80 border border-red-800 text-red-300 text-xs flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => fetchMapData(false)} className="underline hover:text-red-100 font-semibold">
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Main Container: Sidebar Controls + Map */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
