@@ -1,38 +1,41 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema(
   {
-    // Minimal custom user ID (e.g. "USR-014")
     customId: {
       type: String,
       unique: true,
       sparse: true,
-      trim: true,
-      index: true
-    },
-
-    // User display name
-    name: {
-      type: String,
-      required: [true, 'User name is required'],
       trim: true
     },
 
-    // Optional email
-    email: {
+    name: {
       type: String,
+      required: [true, 'User name is required'],
       trim: true,
-      lowercase: true,
-      sparse: true
+      maxlength: 100
     },
 
-    // Role for demo and authorization ('citizen' or 'admin')
+    email: {
+      type: String,
+      required: [true, 'Email is required'],
+      unique: true,
+      lowercase: true,
+      trim: true,
+      match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email']
+    },
+
+    password: {
+      type: String,
+      required: [true, 'Password is required'],
+      minlength: 8,
+      select: false
+    },
+
     role: {
       type: String,
-      enum: {
-        values: ['citizen', 'admin'],
-        message: '{VALUE} is not a valid role. Allowed roles are: citizen, admin'
-      },
+      enum: ['citizen', 'admin'],
       default: 'citizen',
       required: true
     }
@@ -43,17 +46,31 @@ const userSchema = new mongoose.Schema(
       virtuals: true,
       transform: (doc, ret) => {
         ret.id = ret.customId || ret._id.toString();
+        delete ret.password;
+        delete ret.__v;
         return ret;
       }
     },
     toObject: {
-      virtuals: true
+      virtuals: true,
+      transform: (doc, ret) => {
+        delete ret.password;
+        delete ret.__v;
+        return ret;
+      }
     }
   }
 );
 
 userSchema.index({ role: 1 });
 
-const User = mongoose.model('User', userSchema);
+userSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
+  this.password = await bcrypt.hash(this.password, 12);
+});
 
-module.exports = User;
+userSchema.methods.comparePassword = async function (candidatePassword) {
+  return bcrypt.compare(candidatePassword, this.password);
+};
+
+module.exports = mongoose.model('User', userSchema);
