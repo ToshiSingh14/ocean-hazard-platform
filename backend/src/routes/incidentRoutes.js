@@ -4,7 +4,9 @@ const {
   getIncidentById,
   createIncident,
   updateIncident,
-  deleteIncident
+  deleteIncident,
+  mergeIncidents,
+  splitIncident
 } = require('../controllers/incidentController');
 const { requireAuth, requireRole } = require('../middleware/auth');
 
@@ -12,6 +14,9 @@ const router = express.Router();
 
 router.get('/', getIncidents);
 router.get('/:id', getIncidentById);
+
+router.post('/merge', requireAuth, requireRole('admin'), mergeIncidents);
+router.post('/split', requireAuth, requireRole('admin'), splitIncident);
 
 router.post('/', requireAuth, requireRole('admin'), createIncident);
 router.put('/:id', requireAuth, requireRole('admin'), updateIncident);
