@@ -124,4 +124,25 @@ async function login(req, res, next) {
   }
 }
 
-module.exports = { register, login };
+async function getMe(req, res, next) {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User account not found'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        user: publicUser(user)
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { register, login, getMe };
