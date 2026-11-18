@@ -181,7 +181,7 @@ const incidentSchema = new mongoose.Schema(
 );
 
 // Pre-save synchronization hook between centroid and location
-incidentSchema.pre('save', function (next) {
+incidentSchema.pre('save', function () {
   // Sync centroid coordinates to location.centroid
   if (this.centroid && this.centroid.coordinates) {
     if (!this.location) this.location = {};
@@ -207,7 +207,6 @@ incidentSchema.pre('save', function (next) {
     this.location.radiusMeters = this.radiusMeters;
   }
 
-  next();
 });
 
 // Geospatial 2dsphere index for clustering, radius search, and hotspots

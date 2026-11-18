@@ -29,7 +29,8 @@ export const getReports = async (params = {}) => {
       }, 400);
     });
   }
-  return client.get('/reports', { params });
+  const res = await client.get('/reports', { params });
+  return Array.isArray(res) ? res : (res?.data || []);
 };
 
 export const getReportById = async (id) => {
@@ -45,7 +46,8 @@ export const getReportById = async (id) => {
       }, 300);
     });
   }
-  return client.get(`/reports/${id}`);
+  const res = await client.get(`/reports/${id}`);
+  return res?.data || res;
 };
 
 export const createReport = async (reportData) => {
@@ -115,5 +117,6 @@ export const createReport = async (reportData) => {
       }, 500);
     });
   }
-  return client.post('/reports', reportData);
+  const res = await client.post('/reports', reportData);
+  return res;
 };

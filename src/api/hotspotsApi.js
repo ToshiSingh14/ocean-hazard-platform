@@ -25,5 +25,6 @@ export const getHotspots = async (params = {}) => {
       }, 350);
     });
   }
-  return client.get('/hotspots', { params });
+  const res = await client.get('/hotspots', { params });
+  return Array.isArray(res) ? res : (res?.data || []);
 };

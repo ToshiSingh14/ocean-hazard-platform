@@ -79,7 +79,8 @@ export const AnalyticsDashboard = () => {
   }, [hazardFilter, timeFilter]);
 
   if (loading) {
-    return (
+
+  return (
       <div className="space-y-6">
         <SkeletonLoader count={3} />
         <SkeletonLoader type="table" count={4} />
@@ -104,6 +105,18 @@ export const AnalyticsDashboard = () => {
     count: item.count,
     color: SEVERITY_COLORS[item.severity] || '#64748b'
   }));
+
+  // Prepare region data with clean short labels for Y-axis, while preserving full name for tooltip
+  const regionChartData = (data?.byRegion || []).map((item) => {
+    const raw = item.region || 'Unknown';
+    // Shorten if longer than 18 characters
+    const short = raw.length > 18 ? `${raw.slice(0, 16)}...` : raw;
+    return {
+      ...item,
+      shortRegion: short,
+      fullRegion: raw
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -263,15 +276,25 @@ export const AnalyticsDashboard = () => {
             <span className="text-xs text-slate-400">Ranked by volume</span>
           </div>
 
-          <div className="h-56 w-full">
+          <div className="h-72 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data?.byRegion || []} layout="vertical" margin={{ top: 5, right: 10, left: 20, bottom: 5 }}>
+              <BarChart data={regionChartData} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
                 <XAxis type="number" stroke="#64748b" fontSize={11} />
-                <YAxis dataKey="region" type="category" stroke="#94a3b8" fontSize={12} tickLine={false} />
+                <YAxis
+                  dataKey="shortRegion"
+                  type="category"
+                  stroke="#94a3b8"
+                  fontSize={11}
+                  tickLine={false}
+                  width={130}
+                  tick={{ fill: '#94a3b8' }}
+                />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
+                  formatter={(value) => [value, 'Incidents']}
+                  labelFormatter={(shortLabel, payload) => payload?.[0]?.payload?.fullRegion || shortLabel}
                 />
-                <Bar dataKey="count" fill="#10b981" radius={[0, 6, 6, 0]} />
+                <Bar dataKey="count" fill="#10b981" radius={[0, 6, 6, 0]} barSize={16} />
               </BarChart>
             </ResponsiveContainer>
           </div>

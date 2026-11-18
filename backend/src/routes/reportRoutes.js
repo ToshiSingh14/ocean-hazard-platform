@@ -13,7 +13,8 @@ const router = express.Router();
 router.get('/', getReports);
 router.get('/:id', getReportById);
 
-router.post('/', requireAuth, requireRole('admin'), createReport);
+// Citizen report submission in Phase 1 is unauthenticated
+router.post('/', createReport);
 router.put('/:id', requireAuth, requireRole('admin'), updateReport);
 router.patch('/:id', requireAuth, requireRole('admin'), updateReport);
 router.delete('/:id', requireAuth, requireRole('admin'), deleteReport);

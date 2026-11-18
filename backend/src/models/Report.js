@@ -188,7 +188,7 @@ const reportSchema = new mongoose.Schema(
 );
 
 // Pre-save synchronization hook between contract representations
-reportSchema.pre('save', function (next) {
+reportSchema.pre('save', function () {
   // Sync locationName
   if (this.location && this.location.name) {
     this.locationName = this.location.name;
@@ -208,7 +208,6 @@ reportSchema.pre('save', function (next) {
     this.hazard.confidence = this.confidence !== undefined ? this.confidence : 0.85;
   }
 
-  next();
 });
 
 // Geospatial 2dsphere index for proximity and radius queries

@@ -515,7 +515,11 @@ export const MapPage = () => {
               {/* Hotspot Radius Circles */}
               {showHotspots &&
                 hotspots.map((h) => {
-                  const [hLng, hLat] = h.centroid;
+                  const coords = Array.isArray(h.centroid)
+                    ? h.centroid
+                    : (Array.isArray(h.location?.centroid) ? h.location.centroid : h.centroid?.coordinates);
+                  if (!Array.isArray(coords) || coords.length < 2) return null;
+                  const [hLng, hLat] = coords;
                   return (
                     <Circle
                       key={h.id}
@@ -533,8 +537,11 @@ export const MapPage = () => {
 
               {/* Incident Markers */}
               {filteredIncidents.map((incident) => {
-                // Convert GeoJSON [lng, lat] to Leaflet [lat, lng]
-                const [lng, lat] = incident.location.centroid;
+                const coords = Array.isArray(incident.location?.centroid)
+                  ? incident.location.centroid
+                  : (Array.isArray(incident.centroid?.coordinates) ? incident.centroid.coordinates : null);
+                if (!Array.isArray(coords) || coords.length < 2) return null;
+                const [lng, lat] = coords;
                 const icon = createCustomIcon(incident.severity, incident.reportCount);
 
                 return (

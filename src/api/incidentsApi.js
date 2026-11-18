@@ -23,7 +23,8 @@ export const getIncidents = async (params = {}) => {
       }, 400);
     });
   }
-  return client.get('/incidents', { params });
+  const res = await client.get('/incidents', { params });
+  return Array.isArray(res) ? res : (res?.data || []);
 };
 
 export const getIncidentById = async (id) => {
@@ -45,7 +46,8 @@ export const getIncidentById = async (id) => {
       }, 400);
     });
   }
-  return client.get(`/incidents/${id}`);
+  const res = await client.get(`/incidents/${id}`);
+  return res?.data || res;
 };
 
 export const updateIncidentStatus = async (id, verificationStatus) => {
@@ -66,5 +68,6 @@ export const updateIncidentStatus = async (id, verificationStatus) => {
       }, 350);
     });
   }
-  return client.patch(`/incidents/${id}/status`, { verificationStatus });
+  const res = await client.patch(`/incidents/${id}/status`, { verificationStatus });
+  return res?.data || res;
 };

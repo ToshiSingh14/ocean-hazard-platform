@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Incident = require('../models/Incident');
 
 async function getIncidents(req, res, next) {
@@ -11,9 +12,12 @@ async function getIncidents(req, res, next) {
 
 async function getIncidentById(req, res, next) {
   try {
-    const incident = await Incident.findOne({
-      $or: [{ _id: req.params.id }, { customId: req.params.id }]
-    });
+    const isObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+    const query = isObjectId
+      ? { $or: [{ _id: req.params.id }, { customId: req.params.id }] }
+      : { customId: req.params.id };
+
+    const incident = await Incident.findOne(query);
 
     if (!incident) {
       return res.status(404).json({
@@ -22,7 +26,22 @@ async function getIncidentById(req, res, next) {
       });
     }
 
-    res.json({ success: true, data: incident });
+    const Report = require('../models/Report');
+    const reports = await Report.find({
+      $or: [
+        { incidentId: incident.customId },
+        { incidentId: incident._id },
+        { _id: { $in: incident.reportIds || [] } }
+      ]
+    }).sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: {
+        incident,
+        reports
+      }
+    });
   } catch (error) {
     if (error.name === 'CastError') {
       return res.status(404).json({
@@ -45,8 +64,13 @@ async function createIncident(req, res, next) {
 
 async function updateIncident(req, res, next) {
   try {
+    const isObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+    const query = isObjectId
+      ? { $or: [{ _id: req.params.id }, { customId: req.params.id }] }
+      : { customId: req.params.id };
+
     const incident = await Incident.findOneAndUpdate(
-      { $or: [{ _id: req.params.id }, { customId: req.params.id }] },
+      query,
       req.body,
       { new: true, runValidators: true }
     );
@@ -66,9 +90,12 @@ async function updateIncident(req, res, next) {
 
 async function deleteIncident(req, res, next) {
   try {
-    const incident = await Incident.findOneAndDelete({
-      $or: [{ _id: req.params.id }, { customId: req.params.id }]
-    });
+    const isObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
+    const query = isObjectId
+      ? { $or: [{ _id: req.params.id }, { customId: req.params.id }] }
+      : { customId: req.params.id };
+
+    const incident = await Incident.findOneAndDelete(query);
 
     if (!incident) {
       return res.status(404).json({
