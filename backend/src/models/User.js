@@ -70,6 +70,7 @@ userSchema.pre('save', async function () {
 });
 
 userSchema.methods.comparePassword = async function (candidatePassword) {
+  if (!this.password || !candidatePassword) return false;
   return bcrypt.compare(candidatePassword, this.password);
 };
 

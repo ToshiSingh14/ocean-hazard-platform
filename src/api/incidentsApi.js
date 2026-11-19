@@ -71,3 +71,53 @@ export const updateIncidentStatus = async (id, verificationStatus) => {
   const res = await client.patch(`/incidents/${id}/status`, { verificationStatus });
   return res?.data || res;
 };
+
+export const mergeIncidents = async ({ primaryIncidentId, secondaryIncidentIds, resolutionNote }) => {
+  if (USE_MOCKS) {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        const primary = localMockIncidents.find((i) => i.id === primaryIncidentId);
+        if (!primary) return reject(new Error('Primary incident not found'));
+        localMockIncidents = localMockIncidents.filter((i) => !secondaryIncidentIds.includes(i.id));
+        resolve({ primaryIncident: primary, mergedCount: secondaryIncidentIds.length });
+      }, 400);
+    });
+  }
+  const res = await client.post('/incidents/merge', {
+    primaryIncidentId,
+    secondaryIncidentIds,
+    resolutionNote
+  });
+  return res?.data || res;
+};
+
+export const splitIncident = async ({
+  sourceIncidentId,
+  reportIdsToExtract,
+  newIncidentLocationName,
+  newHazardType
+}) => {
+  if (USE_MOCKS) {
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        const source = localMockIncidents.find((i) => i.id === sourceIncidentId);
+        if (!source) return reject(new Error('Source incident not found'));
+        const newInc = {
+          ...source,
+          id: `INC-SPLIT-${Math.floor(100 + Math.random() * 900)}`,
+          reportCount: reportIdsToExtract.length,
+          locationName: newIncidentLocationName || source.locationName
+        };
+        localMockIncidents.push(newInc);
+        resolve({ sourceIncident: source, newIncident: newInc });
+      }, 400);
+    });
+  }
+  const res = await client.post('/incidents/split', {
+    sourceIncidentId,
+    reportIdsToExtract,
+    newIncidentLocationName,
+    newHazardType
+  });
+  return res?.data || res;
+};

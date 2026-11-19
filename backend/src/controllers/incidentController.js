@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Incident = require('../models/Incident');
+const { mergeIncidentsLogic, splitIncidentLogic } = require('../services/incidentClusterService');
 
 async function getIncidents(req, res, next) {
   try {
@@ -32,19 +33,21 @@ async function getIncidentById(req, res, next) {
     console.log('[DEBUG] Incident found:', incident.customId);
     console.log('[DEBUG] Fetching related reports...');
 
-    const reports = await Report.find({
-      $or: [
-        { incidentId: incident.customId },
-        { incidentId: incident._id }
-      ]
-    }).sort({ createdAt: -1 });
-    // const reports = await Report.find({
-    //   $or: [
-    //     { incidentId: incident.customId },
-    //     { incidentId: incident._id },
-    //     { _id: { $in: incident.reportIds || [] } }
-    //   ]
-    // }).sort({ createdAt: -1 });
+    const validReportObjIds = (incident.reportIds || []).filter((id) =>
+      mongoose.Types.ObjectId.isValid(id)
+    );
+    const reportCustomIds = (incident.reportIds || []).map(String);
+
+    const reportOrQuery = [
+      { incidentId: incident.customId },
+      { incidentId: incident._id },
+      { customId: { $in: reportCustomIds } }
+    ];
+    if (validReportObjIds.length > 0) {
+      reportOrQuery.push({ _id: { $in: validReportObjIds } });
+    }
+
+    const reports = await Report.find({ $or: reportOrQuery }).sort({ createdAt: -1 });
 
     res.json({
       success: true,
@@ -91,7 +94,7 @@ async function updateIncident(req, res, next) {
     const incident = await Incident.findOneAndUpdate(
       query,
       req.body,
-      { new: true, runValidators: true }
+      { returnDocument: 'after', runValidators: true }
     );
 
     if (!incident) {
@@ -129,10 +132,57 @@ async function deleteIncident(req, res, next) {
   }
 }
 
+async function mergeIncidents(req, res, next) {
+  try {
+    const { primaryIncidentId, secondaryIncidentIds, resolutionNote } = req.body;
+    const result = await mergeIncidentsLogic({
+      primaryIncidentId,
+      secondaryIncidentIds,
+      resolutionNote
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully merged ${result.mergedCount} incident(s) into ${result.primaryIncident.customId}`,
+      data: result
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to merge incidents'
+    });
+  }
+}
+
+async function splitIncident(req, res, next) {
+  try {
+    const { sourceIncidentId, reportIdsToExtract, newIncidentLocationName, newHazardType } = req.body;
+    const result = await splitIncidentLogic({
+      sourceIncidentId,
+      reportIdsToExtract,
+      newIncidentLocationName,
+      newHazardType
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Successfully extracted ${result.extractedCount} report(s) into new incident ${result.newIncident.customId}`,
+      data: result
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to split incident'
+    });
+  }
+}
+
 module.exports = {
   getIncidents,
   getIncidentById,
   createIncident,
   updateIncident,
-  deleteIncident
+  deleteIncident,
+  mergeIncidents,
+  splitIncident
 };

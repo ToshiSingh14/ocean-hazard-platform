@@ -151,6 +151,8 @@ async function seedDatabase() {
     }
 
     // 7. Seed Demo Administrator User (USR-014)
+    const bcrypt = require('bcryptjs');
+    const adminPasswordHash = await bcrypt.hash('Admin@123456', 12);
     await User.findOneAndUpdate(
       { customId: 'USR-014' },
       {
@@ -158,7 +160,8 @@ async function seedDatabase() {
           customId: 'USR-014',
           name: 'Demo Admin',
           role: 'admin',
-          email: 'admin@oceanhazard.gov'
+          email: 'admin@oceanhazard.gov',
+          password: adminPasswordHash
         }
       },
       { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }

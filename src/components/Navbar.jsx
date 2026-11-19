@@ -10,11 +10,15 @@ import {
   PlusCircle,
   Radio,
   UserCheck,
-  User
+  User,
+  LogOut
 } from 'lucide-react';
 import { USE_MOCKS } from '../config';
+import { useAuth } from '../context/AuthContext';
 
 export const Navbar = ({ role, onToggleRole }) => {
+  const { user, isAdmin, logout } = useAuth();
+
   const navItems = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/map', label: 'Live Map', icon: MapPin },
@@ -93,8 +97,8 @@ export const Navbar = ({ role, onToggleRole }) => {
               )}
             </div>
 
-            {/* Role Toggle Switch */}
-            <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-800">
+            {/* Role Toggle Switch & Auth Controls */}
+            <div className="flex items-center bg-slate-900 p-1 rounded-xl border border-slate-800 gap-1">
               <button
                 type="button"
                 onClick={() => onToggleRole('citizen')}
@@ -121,6 +125,17 @@ export const Navbar = ({ role, onToggleRole }) => {
                 <UserCheck className="w-3.5 h-3.5" />
                 <span>Admin</span>
               </button>
+
+              {isAdmin && role === 'admin' && (
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="p-1 text-slate-400 hover:text-rose-400 transition-colors ml-1"
+                  title="Logout Admin Session"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
         </div>
