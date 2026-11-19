@@ -251,16 +251,59 @@ export const MapPage = () => {
     setMapZoom(7);
   };
 
-  // Prepare heatmap point dataset: converts GeoJSON [lng, lat] to Leaflet [lat, lng] (memoized)
+  // Prepare heatmap point dataset: only verified incidents (memoized)
   const heatPoints = useMemo(() => {
     return filteredIncidents
-      .filter((inc) => inc.location && Array.isArray(inc.location.centroid) && inc.location.centroid.length >= 2)
+      .filter((inc) => inc.location && Array.isArray(inc.location.centroid) && inc.location.centroid.length >= 2 && inc.verificationStatus === 'verified')
       .map((inc) => ({
         lat: inc.location.centroid[1],
         lng: inc.location.centroid[0],
         severity: inc.severity
       }));
   }, [filteredIncidents]);
+
+  // Haversine distance in metres
+  const distanceMeters = (lat1, lng1, lat2, lng2) => {
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const R = 6371000;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const severityRank = { high: 3, medium: 2, low: 1 };
+
+  // Cluster verified incidents within 2 km using fixed anchor
+  const clusterIncidents = (incs) => {
+    const clusters = [];
+    incs.forEach((inc) => {
+      if (!inc.location || !Array.isArray(inc.location.centroid) || inc.location.centroid.length < 2) return;
+      const [lng, lat] = inc.location.centroid;
+      let matched = null;
+      for (const cl of clusters) {
+        if (distanceMeters(lat, lng, cl.anchorLat, cl.anchorLng) <= 2000) { matched = cl; break; }
+      }
+      if (matched) {
+        const total = matched.count + 1;
+        matched.lat = (matched.lat * matched.count + lat) / total;
+        matched.lng = (matched.lng * matched.count + lng) / total;
+        matched.count = total;
+        matched.totalReports += (inc.reportCount || 1);
+        if ((severityRank[inc.severity] || 0) > (severityRank[matched.severity] || 0)) matched.severity = inc.severity;
+        matched.incidents.push(inc);
+      } else {
+        clusters.push({ anchorLat: lat, anchorLng: lng, lat, lng, count: 1, totalReports: inc.reportCount || 1, severity: inc.severity, incidents: [inc] });
+      }
+    });
+    return clusters;
+  };
+
+  // Only verified incidents for map markers
+  const verifiedIncidents = useMemo(() => filteredIncidents.filter((inc) => inc.verificationStatus === 'verified'), [filteredIncidents]);
+
+  // Clustered verified incidents
+  const clusteredPoints = useMemo(() => clusterIncidents(verifiedIncidents), [verifiedIncidents]);
 
   return (
     <div className="space-y-4">
@@ -535,49 +578,48 @@ export const MapPage = () => {
                   );
                 })}
 
-              {/* Incident Markers */}
-              {filteredIncidents.map((incident) => {
-                const coords = Array.isArray(incident.location?.centroid)
-                  ? incident.location.centroid
-                  : (Array.isArray(incident.centroid?.coordinates) ? incident.centroid.coordinates : null);
-                if (!Array.isArray(coords) || coords.length < 2) return null;
-                const [lng, lat] = coords;
-                const icon = createCustomIcon(incident.severity, incident.reportCount);
+              {/* Clustered Verified Incident Markers */}
+              {clusteredPoints.map((cluster, idx) => {
+                const icon = createCustomIcon(cluster.severity, cluster.count);
+                const primary = cluster.incidents[0];
 
                 return (
-                  <Marker key={incident.id} position={[lat, lng]} icon={icon}>
+                  <Marker key={`cluster-${idx}`} position={[cluster.lat, cluster.lng]} icon={icon}>
                     <Popup className="custom-popup">
                       <div className="space-y-2 min-w-[220px]">
                         <div className="flex items-center justify-between border-b border-slate-700 pb-2">
-                          <span className="font-mono text-xs font-bold text-cyan-400">{incident.id}</span>
-                          <SeverityBadge severity={incident.severity} />
+                          <span className="font-mono text-xs font-bold text-cyan-400">{cluster.count > 1 ? `${cluster.count} incidents` : primary.id}</span>
+                          <SeverityBadge severity={cluster.severity} />
                         </div>
 
                         <div>
-                          <h4 className="font-bold text-sm text-slate-100">{incident.location.name}</h4>
+                          <h4 className="font-bold text-sm text-slate-100">{primary.location.name}</h4>
                           <p className="text-xs text-slate-300 mt-1 capitalize flex items-center gap-1.5">
-                            <HazardIcon type={incident.hazardType} size="sm" />
-                            <span>{incident.hazardType.replace('_', ' ')}</span>
+                            <HazardIcon type={primary.hazardType} size="sm" />
+                            <span>{primary.hazardType.replace('_', ' ')}</span>
                           </p>
                         </div>
 
                         <div className="grid grid-cols-2 gap-2 py-1 text-[11px] text-slate-400 bg-slate-900/90 p-2 rounded border border-slate-800">
                           <div>
                             <span className="block text-[10px] text-slate-500 uppercase">Reports</span>
-                            <span className="font-bold text-slate-200">{incident.reportCount}</span>
+                            <span className="font-bold text-slate-200">{cluster.totalReports}</span>
                           </div>
                           <div>
-                            <span className="block text-[10px] text-slate-500 uppercase">Confidence</span>
-                            <span className="font-bold text-slate-200">{(incident.confidence * 100).toFixed(0)}%</span>
+                            <span className="block text-[10px] text-slate-500 uppercase">Incidents</span>
+                            <span className="font-bold text-slate-200">{cluster.count}</span>
                           </div>
                         </div>
 
-                        <Link
-                          to={`/incidents/${incident.id}`}
-                          className="mt-2 block w-full py-1.5 text-center text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-slate-950 rounded transition-colors"
-                        >
-                          View Details & Reports →
-                        </Link>
+                        {cluster.incidents.map((inc) => (
+                          <Link
+                            key={inc.id}
+                            to={`/incidents/${inc.id}`}
+                            className="block w-full py-1.5 text-center text-xs font-bold bg-cyan-600 hover:bg-cyan-500 text-slate-950 rounded transition-colors"
+                          >
+                            {cluster.count > 1 ? `${inc.id} \u2192` : 'View Details & Reports \u2192'}
+                          </Link>
+                        ))}
                       </div>
                     </Popup>
                   </Marker>
@@ -592,3 +634,5 @@ export const MapPage = () => {
 };
 
 export default MapPage;
+
+
