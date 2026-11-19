@@ -184,10 +184,10 @@ ocean-hazard-platform/
 
 | Name | Role |
 | --- | --- |
-| **Kartik Gupta** | Backend & Database |
+| **Kartik Gupta** | Backend  |
 | **Kesar Agrawal** | NLP / AI |
 | **Tanya Agrawal** | Frontend & UI |
-| **Toshi Singh** | Geospatial Analytics |
+| **Toshi Singh** | Geospatial Analytics & Database |
 
 ---
 
