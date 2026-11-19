@@ -580,7 +580,7 @@ export const MapPage = () => {
 
               {/* Clustered Verified Incident Markers */}
               {clusteredPoints.map((cluster, idx) => {
-                const icon = createCustomIcon(cluster.severity, cluster.count);
+                const icon = createCustomIcon(cluster.severity, cluster.totalReports);
                 const primary = cluster.incidents[0];
 
                 return (

@@ -50,7 +50,7 @@ async function seedDatabase() {
     console.log(`  ✓ Loaded ${mockReports.length} sample reports`);
     console.log(`  ✓ Loaded ${mockIncidents.length} sample incidents`);
 
-    // 4. Upsert Incidents (including PURI-042)
+    // 4. Upsert Incidents
     console.log('\n[3/5] Seeding Incidents into MongoDB...');
     const incidentMap = new Map(); // customId -> incident document
 
@@ -72,7 +72,7 @@ async function seedDatabase() {
         locationName: inc.location.name,
         radiusMeters: inc.location.radiusMeters || 1200,
         reportCount: inc.reportCount || 1,
-        reportIds: [], // Will link with report ObjectIds after reports are seeded
+        reportIds: [],
         firstReportedAt: new Date(inc.firstReportedAt || Date.now()),
         lastReportedAt: new Date(inc.lastReportedAt || Date.now()),
         status: inc.status || 'active',
@@ -91,8 +91,6 @@ async function seedDatabase() {
 
     // 5. Upsert Reports
     console.log('\n[4/5] Seeding 18 Sample Reports into MongoDB...');
-    const reportDocs = [];
-
     for (const rep of mockReports) {
       const reportPayload = {
         customId: rep.id,
@@ -121,20 +119,25 @@ async function seedDatabase() {
         createdAt: new Date(rep.createdAt || Date.now())
       };
 
-      const savedReport = await Report.findOneAndUpdate(
+      await Report.findOneAndUpdate(
         { customId: rep.id },
         { $set: reportPayload },
         { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
       );
 
-      reportDocs.push(savedReport);
       console.log(`  • Report ${rep.id} [${rep.hazard.type}] -> Incident: ${rep.incidentId || 'None'}`);
     }
 
-    // 6. Link Report ObjectIds back to their parent Incidents
+    // 6. Link ALL existing Report ObjectIds in DB back to their parent Incidents and enforce synchronized reportCount
     console.log('\n[5/5] Synchronizing Incident -> Report relationship references...');
     for (const [incId, incDoc] of incidentMap.entries()) {
-      const matchingReports = reportDocs.filter((r) => r.incidentId === incId);
+      // Find all reports currently in MongoDB attached to this incident (including dynamically submitted ones)
+      const matchingReports = await Report.find({
+        $or: [
+          { incidentId: incId },
+          { incidentId: incDoc._id }
+        ]
+      });
       const matchingReportObjectIds = matchingReports.map((r) => r._id);
 
       await Incident.updateOne(
@@ -142,12 +145,13 @@ async function seedDatabase() {
         {
           $set: {
             reportIds: matchingReportObjectIds,
-            reportCount: Math.max(incDoc.reportCount, matchingReportObjectIds.length)
+            // Strict Single Source of Truth: reportCount MUST equal the actual count of linked reports
+            reportCount: matchingReportObjectIds.length
           }
         }
       );
 
-      console.log(`  • Linked ${matchingReportObjectIds.length} reports to Incident ${incId}`);
+      console.log(`  • Linked ${matchingReportObjectIds.length} reports to Incident ${incId} (reportCount: ${matchingReportObjectIds.length})`);
     }
 
     // 7. Seed Demo Administrator User (USR-014)
@@ -181,17 +185,13 @@ async function seedDatabase() {
     console.log(`Total Incidents in DB: ${totalIncidents}`);
     console.log(`Total Users in DB:     ${totalUsers}`);
 
-    // Verify PURI-042 specifically
-    const puriIncident = await Incident.findOne({ customId: 'PURI-042' }).populate('reportIds');
-    const puriReports = await Report.find({ incidentId: 'PURI-042' });
-
-    console.log('\nPURI-042 Specific Audit:');
-    console.log(`  Centroid:             [${puriIncident.centroid.coordinates.join(', ')}] (GeoJSON [lng, lat])`);
-    console.log(`  Hazard Type:          ${puriIncident.hazardType}`);
-    console.log(`  Severity:             ${puriIncident.severity}`);
-    console.log(`  Linked Reports Count: ${puriReports.length}`);
-    console.log(`  Report IDs:           ${puriReports.map((r) => r.customId).join(', ')}`);
-    console.log(`  Incident.reportIds:   ${puriIncident.reportIds.length} populated references`);
+    // Verify PARADIP-018 specifically
+    const paradipIncident = await Incident.findOne({ customId: 'PARADIP-018' });
+    const paradipReports = await Report.find({ incidentId: 'PARADIP-018' });
+    console.log('\nPARADIP-018 Specific Audit:');
+    console.log(`  Incident.reportCount: ${paradipIncident.reportCount}`);
+    console.log(`  Actual Reports in DB: ${paradipReports.length}`);
+    console.log(`  Report IDs:           ${paradipReports.map((r) => r.customId).join(', ')}`);
 
     console.log('\n✅ Database seeding successfully completed.\n');
   } catch (error) {
