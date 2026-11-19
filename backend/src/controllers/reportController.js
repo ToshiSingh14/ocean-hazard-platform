@@ -3,6 +3,7 @@ const Report = require('../models/Report');
 const { clusterReport } = require('../services/incidentClusterService');
 const { findDuplicateReport } = require('../services/duplicateDetection');
 const { analyzeText } = require('../services/nlpService');
+const { reverseGeocodeServer } = require('../utils/geoCoder');
 
 async function getReports(req, res, next) {
   try {
@@ -118,6 +119,26 @@ async function createReport(req, res, next) {
       resolvedCoords = [85.8312, 19.8135]; // Default Puri coastline anchor
       resolvedLocationName = resolvedLocationName || 'Puri Coastal Area';
       locationSource = 'extracted';
+    }
+
+    // If location name is missing or is just a raw coordinate string (e.g. 'GPS Pin (19.8135, ...' or 'GPS Location (19.8135, ...'), attempt server-side reverse geocode
+    const isRawGpsPlaceholder = !resolvedLocationName ||
+      /^gps (?:pin|location)\b/i.test(resolvedLocationName) ||
+      /^lat:\s*[-+]?[0-9]*\.?[0-9]+/i.test(resolvedLocationName);
+
+    if (isRawGpsPlaceholder && Array.isArray(resolvedCoords) && resolvedCoords.length === 2) {
+      try {
+        const geoResolved = await reverseGeocodeServer(resolvedCoords[0], resolvedCoords[1], 3000);
+        if (geoResolved) {
+          resolvedLocationName = geoResolved;
+        } else if (!resolvedLocationName) {
+          resolvedLocationName = `GPS Location (${resolvedCoords[1].toFixed(4)}, ${resolvedCoords[0].toFixed(4)})`;
+        }
+      } catch (geoErr) {
+        if (!resolvedLocationName) {
+          resolvedLocationName = `GPS Location (${resolvedCoords[1].toFixed(4)}, ${resolvedCoords[0].toFixed(4)})`;
+        }
+      }
     }
 
     body.locationName = resolvedLocationName || 'Coastal Area';

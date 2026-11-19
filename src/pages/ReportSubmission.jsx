@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { createReport } from '../api/reportsApi';
 import SeverityBadge from '../components/SeverityBadge';
 import HazardIcon from '../components/HazardIcon';
+import { reverseGeocode } from '../utils/geocoding';
 import {
   Send,
   MapPin,
@@ -31,10 +32,19 @@ const defaultIcon = L.icon({
 
 function LocationPicker({ position, setPosition, setLocationText }) {
   useMapEvents({
-    click(e) {
+    async click(e) {
       const newPos = [e.latlng.lat, e.latlng.lng];
       setPosition(newPos);
-      setLocationText(`Lat: ${e.latlng.lat.toFixed(4)}, Lng: ${e.latlng.lng.toFixed(4)}`);
+      const fallback = `GPS Location (${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)})`;
+      setLocationText(fallback);
+      try {
+        const resolved = await reverseGeocode(e.latlng.lat, e.latlng.lng);
+        if (resolved) {
+          setLocationText(resolved);
+        }
+      } catch (err) {
+        // keep fallback
+      }
     }
   });
 
@@ -62,17 +72,32 @@ export const ReportSubmission = () => {
     }
     setIsLocating(true);
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         setCoords([lat, lng]);
-        setLocationText(`GPS Pin (${lat.toFixed(4)}, ${lng.toFixed(4)})`);
-        setIsLocating(false);
+        
+        // Immediate fallback location name
+        const fallback = `GPS Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+        setLocationText(fallback);
+        
+        // Non-blocking reverse geocoding
+        try {
+          const resolved = await reverseGeocode(lat, lng);
+          if (resolved) {
+            setLocationText(resolved);
+          }
+        } catch (err) {
+          console.warn('Reverse geocoding error:', err);
+        } finally {
+          setIsLocating(false);
+        }
       },
       () => {
         alert('Could not auto-detect GPS location. Defaulting to Puri coastal coordinates.');
         setIsLocating(false);
-      }
+      },
+      { timeout: 10000, enableHighAccuracy: true }
     );
   };
 
@@ -96,10 +121,11 @@ export const ReportSubmission = () => {
       setError(null);
 
       // Note: Data contract coordinates are [lng, lat] (GeoJSON format)
+      const sanitizedLocationName = locationText.trim() || 'Puri Shoreline';
       const res = await createReport({
         text,
         locationText,
-        locationName: locationText.split(',')[0] || 'Puri Shoreline',
+        locationName: sanitizedLocationName,
         coordinates: [coords[1], coords[0]], // [lng, lat]
         locationSource: isLocating ? 'gps' : 'extracted',
         hazardType: hazardType || null,
@@ -261,8 +287,8 @@ export const ReportSubmission = () => {
                 disabled={isLocating}
                 className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-400 hover:text-cyan-300 bg-cyan-950/70 border border-cyan-800/80 px-3 py-1.5 rounded-lg"
               >
-                <Crosshair className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin' : ''}`} />
-                <span>{isLocating ? 'Acquiring GPS...' : 'Auto-Detect GPS'}</span>
+                <Crosshair className={`w-3.5 h-3.5 ${isLocating ? 'animate-spin text-cyan-400' : ''}`} />
+                <span>{isLocating ? 'Resolving Address...' : 'Auto-Detect GPS'}</span>
               </button>
             </div>
 
