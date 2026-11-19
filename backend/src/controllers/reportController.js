@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Report = require('../models/Report');
 const { clusterReport } = require('../services/incidentClusterService');
 const { findDuplicateReport } = require('../services/duplicateDetection');
+const { analyzeText } = require('../services/nlpService');
 
 async function getReports(req, res, next) {
   try {
@@ -47,26 +48,88 @@ async function createReport(req, res, next) {
       body.customId = `RPT-${Math.floor(10000 + Math.random() * 90000)}`;
     }
 
-    // Adapt coordinates if sent as body.coordinates [lng, lat]
-    if (Array.isArray(body.coordinates) && !body.location) {
-      body.location = {
-        type: 'Point',
-        coordinates: body.coordinates,
-        name: body.locationName || body.locationText || 'Coastal Location',
-        raw: body.locationText || '',
-        source: body.locationSource || 'extracted'
-      };
+    // 1. NLP Analysis pipeline execution
+    let nlpAnalysis = null;
+    if (body.text && typeof body.text === 'string' && body.text.trim()) {
+      try {
+        const userProvidedCoords = Array.isArray(body.coordinates)
+          ? body.coordinates
+          : (body.location?.coordinates || null);
+
+        nlpAnalysis = await analyzeText(body.text, {
+          coordinates: userProvidedCoords,
+          locationName: body.locationName || body.locationText || null
+        });
+      } catch (nlpErr) {
+        console.warn('[NLP Analysis Warning] Failed to run NLP analysis:', nlpErr.message);
+      }
     }
 
-    if (body.hazardType && !body.hazard) {
+    // 2. Resolve hazard type and confidence
+    // If citizen manually selected hazardType, respect citizen input; otherwise use NLP prediction
+    if (!body.hazardType && nlpAnalysis?.hazard_type) {
+      body.hazardType = nlpAnalysis.hazard_type;
+    } else if (!body.hazardType) {
+      body.hazardType = 'coastal_flooding';
+    }
+
+    if (body.confidence === undefined || body.confidence === null) {
+      body.confidence = nlpAnalysis?.confidence !== undefined ? nlpAnalysis.confidence : 0.85;
+    }
+
+    if (!body.secondaryHazardTypes && nlpAnalysis?.secondary_hazard_types) {
+      body.secondaryHazardTypes = nlpAnalysis.secondary_hazard_types;
+    }
+
+    if (!body.hazard) {
       body.hazard = {
         type: body.hazardType,
-        secondaryTypes: [],
-        confidence: 0.9
+        secondaryTypes: body.secondaryHazardTypes || [],
+        confidence: body.confidence
       };
     }
 
-    // Duplicate check: checks if an identical description was submitted nearby within 24h
+    // Severity resolution: prioritize explicit input, then NLP assessment, then fallback
+    if (!body.severity) {
+      body.severity = nlpAnalysis?.severity || 'medium';
+    }
+
+    // 3. Location Resolution (Strict Priority Rule: GPS/User Coordinates > Text Extraction)
+    let resolvedCoords = null;
+    let resolvedLocationName = body.locationName || body.locationText || null;
+    let locationSource = 'unresolved';
+
+    // Rule 1: Explicit user-provided coordinates (GPS pin / map click)
+    if (Array.isArray(body.coordinates) && body.coordinates.length === 2) {
+      resolvedCoords = body.coordinates;
+      locationSource = 'gps';
+    } else if (Array.isArray(body.location?.coordinates) && body.location.coordinates.length === 2) {
+      resolvedCoords = body.location.coordinates;
+      locationSource = body.location.source || 'gps';
+    } else if (nlpAnalysis?.location?.resolved && Array.isArray(nlpAnalysis.location.coordinates)) {
+      // Rule 2: NLP Text-extracted coastal coordinates
+      resolvedCoords = nlpAnalysis.location.coordinates;
+      resolvedLocationName = resolvedLocationName || nlpAnalysis.location.name;
+      locationSource = 'extracted';
+    }
+
+    // Default to fallback coastal location if completely unresolved
+    if (!resolvedCoords) {
+      resolvedCoords = [85.8312, 19.8135]; // Default Puri coastline anchor
+      resolvedLocationName = resolvedLocationName || 'Puri Coastal Area';
+      locationSource = 'extracted';
+    }
+
+    body.locationName = resolvedLocationName || 'Coastal Area';
+    body.location = {
+      type: 'Point',
+      coordinates: resolvedCoords,
+      name: body.locationName,
+      raw: body.locationText || body.text?.substring(0, 80) || '',
+      source: locationSource
+    };
+
+    // 4. Duplicate check: checks if an identical description was submitted nearby within 24h
     let isDuplicate = false;
     let duplicateOf = null;
     if (body.text && body.location?.coordinates) {
@@ -85,9 +148,10 @@ async function createReport(req, res, next) {
       }
     }
 
+    // 5. Persist Report in MongoDB
     const report = await Report.create(body);
 
-    // Automated Spatial Clustering Engine: associates with existing incident or spawns new one
+    // 6. Automated Spatial Clustering Engine: associates with existing incident or spawns new one
     let clusteredIncident = null;
     try {
       clusteredIncident = await clusterReport(report);
@@ -95,15 +159,19 @@ async function createReport(req, res, next) {
       console.error('[Clustering Error]:', clusterErr.message);
     }
 
+    // 7. Structured classification payload maintaining full compatibility with frontend
     const classification = {
-      hazardType: report.hazardType || 'coastal_flooding',
+      hazardType: report.hazardType,
       secondaryTypes: report.secondaryHazardTypes || [],
-      confidence: report.confidence || 0.88,
+      confidence: report.confidence,
       extractedLocation: {
-        text: report.location?.raw || report.locationName || 'Shoreline',
-        resolved: report.locationName || report.location?.name || 'Shoreline',
-        coordinates: report.location?.coordinates || [85.8312, 19.8135]
-      }
+        text: report.location?.raw || report.locationName,
+        resolved: report.locationName,
+        coordinates: report.location?.coordinates,
+        source: report.location?.source
+      },
+      nlpMetadata: nlpAnalysis?.metadata || null,
+      nlpSeverity: nlpAnalysis?.severity_assessment || null
     };
 
     res.status(201).json({
@@ -114,6 +182,26 @@ async function createReport(req, res, next) {
       isDuplicate,
       duplicateOf,
       data: report
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function analyzeReportPreview(req, res, next) {
+  try {
+    const { text, coordinates, locationName } = req.body;
+    if (!text || typeof text !== 'string' || !text.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Text is required for NLP analysis preview'
+      });
+    }
+
+    const analysis = await analyzeText(text, { coordinates, locationName });
+    res.json({
+      success: true,
+      analysis
     });
   } catch (error) {
     next(error);
@@ -172,6 +260,7 @@ module.exports = {
   getReports,
   getReportById,
   createReport,
+  analyzeReportPreview,
   updateReport,
   deleteReport
 };

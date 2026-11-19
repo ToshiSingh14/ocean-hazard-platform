@@ -1,0 +1,1 @@
+printjson(db.incidents.findOne({customId:'GPSPIN-952'}));

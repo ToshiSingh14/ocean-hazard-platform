@@ -12,6 +12,7 @@ async function getIncidents(req, res, next) {
 
 async function getIncidentById(req, res, next) {
   try {
+    console.log('[DEBUG] Requested incident ID:', req.params.id);
     const isObjectId = mongoose.Types.ObjectId.isValid(req.params.id);
     const query = isObjectId
       ? { $or: [{ _id: req.params.id }, { customId: req.params.id }] }
@@ -27,13 +28,23 @@ async function getIncidentById(req, res, next) {
     }
 
     const Report = require('../models/Report');
+
+    console.log('[DEBUG] Incident found:', incident.customId);
+    console.log('[DEBUG] Fetching related reports...');
+
     const reports = await Report.find({
       $or: [
         { incidentId: incident.customId },
-        { incidentId: incident._id },
-        { _id: { $in: incident.reportIds || [] } }
+        { incidentId: incident._id }
       ]
     }).sort({ createdAt: -1 });
+    // const reports = await Report.find({
+    //   $or: [
+    //     { incidentId: incident.customId },
+    //     { incidentId: incident._id },
+    //     { _id: { $in: incident.reportIds || [] } }
+    //   ]
+    // }).sort({ createdAt: -1 });
 
     res.json({
       success: true,
@@ -43,12 +54,20 @@ async function getIncidentById(req, res, next) {
       }
     });
   } catch (error) {
-    if (error.name === 'CastError') {
-      return res.status(404).json({
-        success: false,
-        message: 'Incident not found'
-      });
-    }
+    // if (error.name === 'CastError') {
+    //   console.log("catch block is running")
+    //   return res.status(404).json({
+    //     success: false,
+    //     message: 'Incident not found',
+    //     error: error.message
+    //   });
+    // }
+    // next(error);
+    console.error('[INCIDENT ERROR]', error);
+    console.error('Name:', error.name);
+    console.error('Message:', error.message);
+    console.error('Path:', error.path);
+    console.error('Value:', error.value);
     next(error);
   }
 }

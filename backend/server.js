@@ -38,7 +38,33 @@ async function shutdown(signal) {
   }
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+// process.on('SIGINT', () => {
+//   console.log('[DEBUG] SIGINT received');
+//   shutdown('SIGINT');
+// });
+
+// process.on('SIGTERM', () => {
+//   console.log('[DEBUG] SIGTERM received');
+//   shutdown('SIGTERM');
+// });
+// process.on('SIGINT', () => shutdown('SIGINT'));
+// process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => {
+  console.log('[DEBUG] SIGINT received at:', new Date().toISOString());
+  shutdown('SIGINT');
+});
+
+process.on('SIGTERM', () => {
+  console.log('[DEBUG] SIGTERM received at:', new Date().toISOString());
+  shutdown('SIGTERM');
+});
+
+process.on('beforeExit', (code) => {
+  console.log('[DEBUG] beforeExit:', code, new Date().toISOString());
+});
+
+process.on('exit', (code) => {
+  console.log('[DEBUG] Process exiting:', code, new Date().toISOString());
+});
 
 startServer();
